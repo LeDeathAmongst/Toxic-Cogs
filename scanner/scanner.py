@@ -32,7 +32,6 @@ import aiohttp
 import discord
 from redbot.core import Config, commands
 from redbot.core.utils.chat_formatting import humanize_list, inline
-from Star_Utils import Cog
 
 URL = "https://api.sightengine.com/1.0/check.json"
 TEXT_URL = "https://api.sightengine.com/1.0/text/check.json"
@@ -53,7 +52,7 @@ TEXT_MODERATION_CHECKS = [
 ]
 
 
-class Scanner(Cog):
+class Scanner(commands.Cog):
     """Scan images as they are sent through according to the set models."""
 
     def __init__(self, bot):
