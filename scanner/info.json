@@ -1,6 +1,7 @@
 {
     "author": [
-        "Neuro Assassin"
+        "Neuro Assassin",
+        "Star"
     ],
     "install_msg": "Thank you for downloading this cog.  All settings are disabled by default.  Run `[p]scanner settings`.",
     "name": "scanner",
