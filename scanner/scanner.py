@@ -1,33 +1,8 @@
-"""
-MIT License
-
-Copyright (c) 2018-Present NeuroAssassin
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-"""
-
 import contextlib
 import copy
 import io
 import re
 import traceback
-
 import aiohttp
 import discord
 from redbot.core import Config, commands
@@ -36,24 +11,25 @@ from redbot.core.utils.chat_formatting import humanize_list, inline
 URL = "https://api.sightengine.com/1.0/check.json"
 TEXT_URL = "https://api.sightengine.com/1.0/text/check.json"
 
+# Expanded checks to include more personal information
 TEXT_MODERATION_CHECKS = [
     "sexual",
     "insult",
     "discriminatory",
-    "innapropriate",
+    "inappropriate",
     "other_profanity",
     "email",
     "ipv4",
     "ipv6",
-    "phone_number_us",
-    "phone_number_uk",
-    "phone_number_fr",
+    "phone_number",  # General phone number check
     "ssn",
+    "passport",
+    "driver_license",
+    # Add any other checks your API or regex can handle
 ]
 
-
 class Scanner(commands.Cog):
-    """Scan images as they are sent through according to the set models."""
+    """Scan images and messages for inappropriate content and personal information."""
 
     def __init__(self, bot):
         self.bot = bot
@@ -102,10 +78,7 @@ class Scanner(commands.Cog):
                 return
 
             settings = await self.conf.guild(message.guild).all()
-            if not (
-                settings["rawtextmoderation"]["enabled"]
-                and settings["rawtextmoderation"]["enabled"]
-            ):
+            if not settings["rawtextmoderation"]["enabled"]:
                 return
             if settings["whitelist"] and message.channel.id not in settings["whitelist"]:
                 return
@@ -133,20 +106,18 @@ class Scanner(commands.Cog):
                 await message.channel.send(f"Error, code {returned.status} on message processing.")
 
             tm_violations = []
-            tm_builder = ""
 
-            for profanity in json["profanity"]["matches"]:
-                if profanity["type"] in settings["rawtextmoderation"]["checks"]:
-                    tm_violations.append((profanity["type"], profanity["match"]))
-
-            for personal in json["personal"]["matches"]:
-                if personal["type"] in settings["rawtextmoderation"]["checks"]:
-                    tm_violations.append((personal["type"], personal["match"]))
+            # Check for violations in the response
+            for category in ["profanity", "personal"]:
+                for match in json.get(category, {}).get("matches", []):
+                    if match["type"] in settings["rawtextmoderation"]["checks"]:
+                        tm_violations.append((match["type"], match["match"]))
 
             if tm_violations:
-                tm_builder = ""
-                for violation in tm_violations:
-                    tm_builder += f"Message Moderation ({violation[0]}): {violation[1]}\n"
+                tm_builder = "\n".join(
+                    f"Message Moderation ({violation[0]}): {violation[1]}"
+                    for violation in tm_violations
+                )
 
                 deleted = False
                 if settings["autodelete"]:
@@ -294,9 +265,10 @@ class Scanner(commands.Cog):
                             tm_violations.append((personal["type"], personal["match"]))
 
                     if tm_violations:
-                        tm_builder = ""
-                        for violation in tm_violations:
-                            tm_builder += f"Text Moderation ({violation[0]}): {violation[1]}\n"
+                        tm_builder = "\n".join(
+                            f"Text Moderation ({violation[0]}): {violation[1]}"
+                            for violation in tm_violations
+                        )
 
                 if nudity or partial or wad or offensive or scammer or tm_violations:
                     if settings["showpic"]:
@@ -315,20 +287,18 @@ class Scanner(commands.Cog):
                         )
                         if settings["showpic"]:
                             embed.set_image(url=f"attachment://{attach.filename}")
-                        violating = (
-                            "Nudity\n"
-                            if nudity
-                            else "" "Partial Nudity\n"
-                            if partial
-                            else "" "WAD\n"
-                            if wad
-                            else "" "Offensive\n"
-                            if offensive
-                            else "" "Scammer\n"
-                            if scammer
-                            else "" f"{tm_builder}"
-                            if tm_violations
-                            else ""
+                        violating = "\n".join(
+                            filter(
+                                None,
+                                [
+                                    "Nudity" if nudity else "",
+                                    "Partial Nudity" if partial else "",
+                                    "WAD" if wad else "",
+                                    "Offensive" if offensive else "",
+                                    "Scammer" if scammer else "",
+                                    tm_builder if tm_violations else "",
+                                ],
+                            )
                         )
                         embed.add_field(name="Violating:", value=violating)
                         if not deleted:
@@ -359,6 +329,7 @@ class Scanner(commands.Cog):
                 "".join(traceback.format_exception(type(error), error, error.__traceback__))
             )
 
+    # Administrative commands for configuration
     @commands.admin_or_permissions(manage_messages=True)
     @commands.group()
     async def scanner(self, ctx):
@@ -690,7 +661,7 @@ class Scanner(commands.Cog):
     async def checks_add(self, ctx, *checks: str):
         """Adds checks to the Text Moderation check.
 
-        Must be `sexual`, `insult`, `disciminatory`, `innapropriate`, `other_profanity`, `email`, `ipv4`, `ipv6`, `phone_number_us`, `phone_number_uk`, `phone_number_fr` or `ssn`.
+        Must be `sexual`, `insult`, `disciminatory`, `innapropriate`, `other_profanity`, `email`, `ipv4`, `ipv6`, `phone_number`, `ssn`, `passport`, or `driver_license`.
         """
         if not checks:
             return await ctx.send_help()
@@ -740,7 +711,7 @@ class Scanner(commands.Cog):
 
     @tm.command(name="enable")
     async def textmoderation_enable(self, ctx, yes_or_no: bool):
-        """Set whether or not to check for Text Mderation in images."""
+        """Set whether or not to check for Text Moderation in images."""
         async with self.conf.guild(ctx.guild).textmoderation() as data:
             data["enabled"] = yes_or_no
         if yes_or_no:
@@ -777,7 +748,7 @@ class Scanner(commands.Cog):
     async def mm_checks_add(self, ctx, *checks: str):
         """Adds checks to the Message Moderation check.
 
-        Must be `sexual`, `insult`, `disciminatory`, `innapropriate`, `other_profanity`, `email`, `ipv4`, `ipv6`, `phone_number_us`, `phone_number_uk`, `phone_number_fr` or `ssn`.
+        Must be `sexual`, `insult`, `disciminatory`, `innapropriate`, `other_profanity`, `email`, `ipv4`, `ipv6`, `phone_number`, `ssn`, `passport`, or `driver_license`.
         """
         if not checks:
             return await ctx.send_help()
@@ -828,12 +799,12 @@ class Scanner(commands.Cog):
     @commands.is_owner()
     @mm.command(name="enable")
     async def messagemoderation_enable(self, ctx, yes_or_no: bool):
-        """Set whether or not to check for Message Mderation."""
+        """Set whether or not to check for Message Moderation."""
         async with self.conf.guild(ctx.guild).rawtextmoderation() as data:
             data["enabled"] = yes_or_no
         if yes_or_no:
             await ctx.send(
-                "Messages will now be reported if they violate the MessageModeration checks.\nThis will make your bot slower and will use up your API quota fast!  Be aware of issues that may arise due to this."
+                "Messages will now be reported if they violate the Message Moderation checks.\nThis will make your bot slower and will use up your API quota fast!  Be aware of issues that may arise due to this."
             )
         else:
             await ctx.send(
