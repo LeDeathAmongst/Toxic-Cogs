@@ -32,6 +32,7 @@ import aiohttp
 import discord
 from redbot.core import Config, commands
 from redbot.core.utils.chat_formatting import humanize_list, inline
+from Star_Utils import Cog
 
 URL = "https://api.sightengine.com/1.0/check.json"
 TEXT_URL = "https://api.sightengine.com/1.0/text/check.json"
@@ -52,7 +53,7 @@ TEXT_MODERATION_CHECKS = [
 ]
 
 
-class Scanner(commands.Cog):
+class Scanner(Cog):
     """Scan images as they are sent through according to the set models."""
 
     def __init__(self, bot):
@@ -77,6 +78,8 @@ class Scanner(commands.Cog):
             "roles": [],
             "whitelist": [],
             "blacklist": [],
+            "mention_roles": [],
+            "mention_users": [],
         }
         self.conf.register_guild(**default_guild)
 
@@ -139,7 +142,6 @@ class Scanner(commands.Cog):
 
             for personal in json["personal"]["matches"]:
                 if personal["type"] in settings["rawtextmoderation"]["checks"]:
-                    textmoderation = True
                     tm_violations.append((personal["type"], personal["match"]))
 
             if tm_violations:
@@ -166,19 +168,23 @@ class Scanner(commands.Cog):
                             value=f"Here's a jump url: [Click Here]({message.jump_url})",
                         )
                     content = None
-                    if settings["roles"]:
-                        content = ", ".join(
-                            [
-                                message.guild.get_role(r).mention
-                                for r in settings["roles"]
-                                if message.guild.get_role(r)
-                            ]
-                        )
+                    if settings["mention_roles"] or settings["mention_users"]:
+                        role_mentions = [
+                            message.guild.get_role(r).mention
+                            for r in settings["mention_roles"]
+                            if message.guild.get_role(r)
+                        ]
+                        user_mentions = [
+                            message.guild.get_member(u).mention
+                            for u in settings["mention_users"]
+                            if message.guild.get_member(u)
+                        ]
+                        content = " ".join(role_mentions + user_mentions)
                     await channel.send(
                         content=content,
                         embed=embed,
                         allowed_mentions=discord.AllowedMentions(
-                            everyone=False, users=False, roles=True
+                            everyone=False, users=True, roles=True
                         ),
                     )
         except Exception as error:
@@ -332,14 +338,18 @@ class Scanner(commands.Cog):
                                 value=f"Here's a jump url: [Click Here]({message.jump_url})",
                             )
                         content = None
-                        if settings["roles"]:
-                            content = ", ".join(
-                                [
-                                    message.guild.get_role(r).mention
-                                    for r in settings["roles"]
-                                    if message.guild.get_role(r)
-                                ]
-                            )
+                        if settings["mention_roles"] or settings["mention_users"]:
+                            role_mentions = [
+                                message.guild.get_role(r).mention
+                                for r in settings["mention_roles"]
+                                if message.guild.get_role(r)
+                            ]
+                            user_mentions = [
+                                message.guild.get_member(u).mention
+                                for u in settings["mention_users"]
+                                if message.guild.get_member(u)
+                            ]
+                            content = " ".join(role_mentions + user_mentions)
                         if settings["showpic"]:
                             await channel.send(content=content, embed=embed, file=f)
                         else:
@@ -397,33 +407,63 @@ class Scanner(commands.Cog):
             await ctx.send("Messages will now not be shown in the report.")
 
     @report.command()
-    async def pingrole(self, ctx, *, role: discord.Role = None):
-        """Add or remove roles from being pinged when a report is sent."""
+    async def mentionrole(self, ctx, *, role: discord.Role = None):
+        """Add or remove roles from being mentioned when a report is sent."""
         if role:
-            async with self.conf.guild(ctx.guild).roles() as roles:
-                if role.id in roles:
-                    roles.remove(role.id)
-                    await ctx.send(f"The {role.name} role has been removed.")
+            async with self.conf.guild(ctx.guild).mention_roles() as mention_roles:
+                if role.id in mention_roles:
+                    mention_roles.remove(role.id)
+                    await ctx.send(f"The {role.name} role has been removed from mentions.")
                 else:
-                    roles.append(role.id)
-                    await ctx.send(f"The {role.name} role has been added.")
+                    mention_roles.append(role.id)
+                    await ctx.send(f"The {role.name} role has been added for mentions.")
         else:
-            roles = await self.conf.guild(ctx.guild).roles()
-            new = copy.deepcopy(roles)
-            if not roles:
-                await ctx.send("No roles are set for ping right now.")
+            mention_roles = await self.conf.guild(ctx.guild).mention_roles()
+            new = copy.deepcopy(mention_roles)
+            if not mention_roles:
+                await ctx.send("No roles are set for mentions right now.")
                 return
             e = discord.Embed(
-                title="The following roles are pinged when a report comes in.", description=""
+                title="The following roles are mentioned when a report comes in.", description=""
             )
-            for r in roles:
+            for r in mention_roles:
                 ro = ctx.guild.get_role(r)
                 if ro:
                     e.description += ro.mention + "\n"
                 else:
                     new.remove(r)
-            if new != roles:
-                await self.conf.guild(ctx.guild).roles.set(new)
+            if new != mention_roles:
+                await self.conf.guild(ctx.guild).mention_roles.set(new)
+            await ctx.send(embed=e)
+
+    @report.command()
+    async def mentionuser(self, ctx, *, user: discord.Member = None):
+        """Add or remove users from being mentioned when a report is sent."""
+        if user:
+            async with self.conf.guild(ctx.guild).mention_users() as mention_users:
+                if user.id in mention_users:
+                    mention_users.remove(user.id)
+                    await ctx.send(f"The user {user.name} has been removed from mentions.")
+                else:
+                    mention_users.append(user.id)
+                    await ctx.send(f"The user {user.name} has been added for mentions.")
+        else:
+            mention_users = await self.conf.guild(ctx.guild).mention_users()
+            new = copy.deepcopy(mention_users)
+            if not mention_users:
+                await ctx.send("No users are set for mentions right now.")
+                return
+            e = discord.Embed(
+                title="The following users are mentioned when a report comes in.", description=""
+            )
+            for u in mention_users:
+                us = ctx.guild.get_member(u)
+                if us:
+                    e.description += us.mention + "\n"
+                else:
+                    new.remove(u)
+            if new != mention_users:
+                await self.conf.guild(ctx.guild).mention_users.set(new)
             await ctx.send(embed=e)
 
     @commands.is_owner()
@@ -449,10 +489,22 @@ class Scanner(commands.Cog):
             for c in settings["blacklist"]
             if self.bot.get_channel(c)
         ] or ["`None`"]
+        mention_roles = [
+            ctx.guild.get_role(r).mention
+            for r in settings["mention_roles"]
+            if ctx.guild.get_role(r)
+        ] or ["`None`"]
+        mention_users = [
+            ctx.guild.get_member(u).mention
+            for u in settings["mention_users"]
+            if ctx.guild.get_member(u)
+        ] or ["`None`"]
         s = (
             f"Reporting Channel: {channel.mention if channel else '`None`'}\n"
             f"Whitelisted Channels: {humanize_list(whitelist)}\n"
             f"Blacklisted Channels: {humanize_list(blacklist)}\n"
+            f"Mentioned Roles: {humanize_list(mention_roles)}\n"
+            f"Mentioned Users: {humanize_list(mention_users)}\n"
             "```py\n"
             f"Percent: {settings['percent']}\n"
             f"Auto Deleting: {settings['autodelete']}\n"
