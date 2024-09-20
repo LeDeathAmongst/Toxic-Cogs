@@ -64,9 +64,9 @@ class Scanner(commands.Cog):
         """This cog does not store user data"""
         return
 
-    def get_mentions(self, guild):
+    async def get_mentions(self, guild):
         """Get mentions for configured roles and users."""
-        settings = self.conf.guild(guild)
+        settings = await self.conf.guild(guild).all()  # Retrieve all settings as a dictionary
         role_mentions = [
             guild.get_role(r).mention
             for r in settings["mention_roles"]
@@ -153,7 +153,7 @@ class Scanner(commands.Cog):
                             name="Message was not deleted",
                             value=f"Here's a jump url: [Click Here]({message.jump_url})",
                         )
-                    content = self.get_mentions(message.guild)
+                    content = await self.get_mentions(message.guild)
                     await channel.send(
                         content=content,
                         embed=embed,
@@ -310,7 +310,7 @@ class Scanner(commands.Cog):
                                 name="Message was not deleted",
                                 value=f"Here's a jump url: [Click Here]({message.jump_url})",
                             )
-                        content = self.get_mentions(message.guild)
+                        content = await self.get_mentions(message.guild)
                         if settings["showpic"]:
                             await channel.send(content=content, embed=embed, file=f)
                         else:
