@@ -52,8 +52,8 @@ class Scanner(commands.Cog):
             "roles": [],
             "whitelist": [],
             "blacklist": [],
-            "mention_role": None,  # New configuration for mention role
-            "mention_user": None,  # New configuration for mention user
+            "mention_role": None,  # Configuration for mention role
+            "mention_user": None,  # Configuration for mention user
         }
         self.conf.register_guild(**default_guild)
 
@@ -82,11 +82,11 @@ class Scanner(commands.Cog):
             if settings["mention_role"]:
                 role = message.guild.get_role(settings["mention_role"])
                 if role:
-                    content.append(role.mention)
+                    content.append(role.mention)  # Ensure the role is mentioned
             if settings["mention_user"]:
                 user = message.guild.get_member(settings["mention_user"])
                 if user:
-                    content.append(user.mention)
+                    content.append(user.mention)  # Ensure the user is mentioned
             content = " ".join(content) if content else None
             await channel.send(content=content, embed=embed, file=file)
 
