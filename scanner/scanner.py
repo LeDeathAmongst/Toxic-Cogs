@@ -1,4 +1,3 @@
-
 """
 MIT License
 
@@ -89,6 +88,20 @@ class Scanner(commands.Cog):
         """This cog does not store user data"""
         return
 
+    # Helper function to get mentions
+    def get_mentions(self, guild, mention_roles, mention_users):
+        role_mentions = [
+            guild.get_role(r).mention
+            for r in mention_roles
+            if guild.get_role(r)
+        ]
+        user_mentions = [
+            guild.get_member(u).mention
+            for u in mention_users
+            if guild.get_member(u)
+        ]
+        return " ".join(role_mentions + user_mentions)
+
     # Text listener
     @commands.Cog.listener("on_message")
     async def text_on_message(self, message):
@@ -167,19 +180,7 @@ class Scanner(commands.Cog):
                             name="Message was not deleted",
                             value=f"Here's a jump url: [Click Here]({message.jump_url})",
                         )
-                    content = None
-                    if settings["mention_roles"] or settings["mention_users"]:
-                        role_mentions = [
-                            message.guild.get_role(r).mention
-                            for r in settings["mention_roles"]
-                            if message.guild.get_role(r)
-                        ]
-                        user_mentions = [
-                            message.guild.get_member(u).mention
-                            for u in settings["mention_users"]
-                            if message.guild.get_member(u)
-                        ]
-                        content = " ".join(role_mentions + user_mentions)
+                    content = self.get_mentions(message.guild, settings["mention_roles"], settings["mention_users"])
                     await channel.send(
                         content=content,
                         embed=embed,
@@ -337,19 +338,7 @@ class Scanner(commands.Cog):
                                 name="Message was not deleted",
                                 value=f"Here's a jump url: [Click Here]({message.jump_url})",
                             )
-                        content = None
-                        if settings["mention_roles"] or settings["mention_users"]:
-                            role_mentions = [
-                                message.guild.get_role(r).mention
-                                for r in settings["mention_roles"]
-                                if message.guild.get_role(r)
-                            ]
-                            user_mentions = [
-                                message.guild.get_member(u).mention
-                                for u in settings["mention_users"]
-                                if message.guild.get_member(u)
-                            ]
-                            content = " ".join(role_mentions + user_mentions)
+                        content = self.get_mentions(message.guild, settings["mention_roles"], settings["mention_users"])
                         if settings["showpic"]:
                             await channel.send(content=content, embed=embed, file=f)
                         else:
