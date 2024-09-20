@@ -28,6 +28,14 @@ TEXT_MODERATION_CHECKS = [
     # Add any other checks your API or regex can handle
 ]
 
+def mention_role(role_id):
+    """Return the mention string for a role given its ID."""
+    return f"<@&{role_id}>"
+
+def mention_user(user_id):
+    """Return the mention string for a user given their ID."""
+    return f"<@{user_id}>"
+
 class Scanner(commands.Cog):
     """Scan images and messages for inappropriate content and personal information."""
 
@@ -137,20 +145,18 @@ class Scanner(commands.Cog):
                             name="Message was not deleted",
                             value=f"Here's a jump url: [Click Here]({message.jump_url})",
                         )
-                    content = None
-                    if settings["mention_roles"] or settings["mention_users"]:
-                        role_mentions = [
-                            message.guild.get_role(r).mention
-                            for r in settings["mention_roles"]
-                            if message.guild.get_role(r)
-                        ]
-                        user_mentions = [
-                            message.guild.get_member(u).mention
-                            for u in settings["mention_users"]
-                            if message.guild.get_member(u)
-                        ]
-                        # Ensure roles are mentioned first, followed by users
-                        content = " ".join(role_mentions + user_mentions)
+                    role_mentions = [
+                        mention_role(r)
+                        for r in settings["mention_roles"]
+                        if message.guild.get_role(r)
+                    ]
+                    user_mentions = [
+                        mention_user(u)
+                        for u in settings["mention_users"]
+                        if message.guild.get_member(u)
+                    ]
+                    # Combine role and user mentions
+                    content = " ".join(role_mentions + user_mentions)
                     await channel.send(
                         content=content,
                         embed=embed,
@@ -307,20 +313,18 @@ class Scanner(commands.Cog):
                                 name="Message was not deleted",
                                 value=f"Here's a jump url: [Click Here]({message.jump_url})",
                             )
-                        content = None
-                        if settings["mention_roles"] or settings["mention_users"]:
-                            role_mentions = [
-                                message.guild.get_role(r).mention
-                                for r in settings["mention_roles"]
-                                if message.guild.get_role(r)
-                            ]
-                            user_mentions = [
-                                message.guild.get_member(u).mention
-                                for u in settings["mention_users"]
-                                if message.guild.get_member(u)
-                            ]
-                            # Ensure roles are mentioned first, followed by users
-                            content = " ".join(role_mentions + user_mentions)
+                        role_mentions = [
+                            mention_role(r)
+                            for r in settings["mention_roles"]
+                            if message.guild.get_role(r)
+                        ]
+                        user_mentions = [
+                            mention_user(u)
+                            for u in settings["mention_users"]
+                            if message.guild.get_member(u)
+                        ]
+                        # Combine role and user mentions
+                        content = " ".join(role_mentions + user_mentions)
                         if settings["showpic"]:
                             await channel.send(content=content, embed=embed, file=f)
                         else:
