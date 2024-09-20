@@ -64,31 +64,27 @@ class Scanner(commands.Cog):
         return
 
     async def send_report(self, message, embed, file=None):
-        """Helper method to send reports with mentions."""
-        settings = await self.conf.guild(message.guild).all()
-        channel = self.bot.get_channel(settings["channel"])
-        if channel:
-            content = []
-            if settings["roles"]:
-                content.append(
-                    ", ".join(
-                        [
-                            message.guild.get_role(r).mention
-                            for r in settings["roles"]
-                            if message.guild.get_role(r)
-                        ]
-                    )
-                )
-            if settings["mention_role"]:
-                role = message.guild.get_role(settings["mention_role"])
-                if role:
-                    content.append(role.mention)  # Ensure the role is mentioned
-            if settings["mention_user"]:
-                user = message.guild.get_member(settings["mention_user"])
-                if user:
-                    content.append(user.mention)  # Ensure the user is mentioned
-            content = " ".join(content) if content else None
-            await channel.send(content=content, embed=embed, file=file)
+         """Helper method to send reports with mentions."""
+         settings = await self.conf.guild(message.guild).all()
+         channel = self.bot.get_channel(settings["channel"])
+         if channel:
+             content = []
+             if settings["roles"]:
+                 # Format role mentions manually
+                 content.append(
+                     ", ".join(
+                         [f"<@&{r}>" for r in settings["roles"] if message.guild.get_role(r)]
+                     )
+                 )
+             if settings["mention_role"]:
+                 # Manually format the role mention using its ID
+                 content.append(f"<@&{settings['mention_role']}>")
+             if settings["mention_user"]:
+                 user = message.guild.get_member(settings["mention_user"])
+                 if user:
+                     content.append(user.mention)  # Use the usual mention for users
+             content = " ".join(content) if content else None
+             await channel.send(content=content, embed=embed, file=file)
 
     # Text listener
     @commands.Cog.listener("on_message")
