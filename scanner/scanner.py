@@ -3,6 +3,7 @@ import copy
 import io
 import re
 import traceback
+
 import aiohttp
 import discord
 from redbot.core import Config, commands
@@ -11,25 +12,23 @@ from redbot.core.utils.chat_formatting import humanize_list, inline
 URL = "https://api.sightengine.com/1.0/check.json"
 TEXT_URL = "https://api.sightengine.com/1.0/text/check.json"
 
-# Expanded checks to include more personal information
 TEXT_MODERATION_CHECKS = [
     "sexual",
     "insult",
     "discriminatory",
-    "inappropriate",
+    "innapropriate",
     "other_profanity",
     "email",
     "ipv4",
     "ipv6",
-    "phone_number",  # General phone number check
+    "phone_number_us",
+    "phone_number_uk",
+    "phone_number_fr",
     "ssn",
-    "passport",
-    "driver_license",
-    # Add any other checks your API or regex can handle
 ]
 
 class Scanner(commands.Cog):
-    """Scan images and messages for inappropriate content and personal information."""
+    """Scan images as they are sent through according to the set models."""
 
     def __init__(self, bot):
         self.bot = bot
@@ -53,8 +52,8 @@ class Scanner(commands.Cog):
             "roles": [],
             "whitelist": [],
             "blacklist": [],
-            "mention_roles": [],
-            "mention_users": [],
+            "mention_role": None,  # New configuration for mention role
+            "mention_user": None,  # New configuration for mention user
         }
         self.conf.register_guild(**default_guild)
 
@@ -64,21 +63,32 @@ class Scanner(commands.Cog):
         """This cog does not store user data"""
         return
 
-    async def get_mentions(self, guild):
-        """Get mentions for configured roles and users."""
-        settings = await self.conf.guild(guild).all()  # Retrieve all settings as a dictionary
-        role_mentions = [
-            guild.get_role(r).mention
-            for r in settings["mention_roles"]
-            if guild.get_role(r)
-        ]
-        user_mentions = [
-            guild.get_member(u).mention
-            for u in settings["mention_users"]
-            if guild.get_member(u)
-        ]
-        # Combine role and user mentions
-        return " ".join(role_mentions + user_mentions)
+    async def send_report(self, message, embed, file=None):
+        """Helper method to send reports with mentions."""
+        settings = await self.conf.guild(message.guild).all()
+        channel = self.bot.get_channel(settings["channel"])
+        if channel:
+            content = []
+            if settings["roles"]:
+                content.append(
+                    ", ".join(
+                        [
+                            message.guild.get_role(r).mention
+                            for r in settings["roles"]
+                            if message.guild.get_role(r)
+                        ]
+                    )
+                )
+            if settings["mention_role"]:
+                role = message.guild.get_role(settings["mention_role"])
+                if role:
+                    content.append(role.mention)
+            if settings["mention_user"]:
+                user = message.guild.get_member(settings["mention_user"])
+                if user:
+                    content.append(user.mention)
+            content = " ".join(content) if content else None
+            await channel.send(content=content, embed=embed, file=file)
 
     # Text listener
     @commands.Cog.listener("on_message")
@@ -94,7 +104,10 @@ class Scanner(commands.Cog):
                 return
 
             settings = await self.conf.guild(message.guild).all()
-            if not settings["rawtextmoderation"]["enabled"]:
+            if not (
+                settings["rawtextmoderation"]["enabled"]
+                and settings["rawtextmoderation"]["enabled"]
+            ):
                 return
             if settings["whitelist"] and message.channel.id not in settings["whitelist"]:
                 return
@@ -122,45 +135,38 @@ class Scanner(commands.Cog):
                 await message.channel.send(f"Error, code {returned.status} on message processing.")
 
             tm_violations = []
+            tm_builder = ""
 
-            # Check for violations in the response
-            for category in ["profanity", "personal"]:
-                for match in json.get(category, {}).get("matches", []):
-                    if match["type"] in settings["rawtextmoderation"]["checks"]:
-                        tm_violations.append((match["type"], match["match"]))
+            for profanity in json["profanity"]["matches"]:
+                if profanity["type"] in settings["rawtextmoderation"]["checks"]:
+                    tm_violations.append((profanity["type"], profanity["match"]))
+
+            for personal in json["personal"]["matches"]:
+                if personal["type"] in settings["rawtextmoderation"]["checks"]:
+                    tm_violations.append((personal["type"], personal["match"]))
 
             if tm_violations:
-                tm_builder = "\n".join(
-                    f"Message Moderation ({violation[0]}): {violation[1]}"
-                    for violation in tm_violations
-                )
+                tm_builder = ""
+                for violation in tm_violations:
+                    tm_builder += f"Message Moderation ({violation[0]}): {violation[1]}\n"
 
                 deleted = False
                 if settings["autodelete"]:
                     with contextlib.suppress(discord.HTTPException):
                         await message.delete()
                         deleted = True
-                channel = self.bot.get_channel(settings["channel"])
-                if channel:
-                    embed = discord.Embed(
-                        title="Scanner detected a violating message.",
-                        description=f"Author: {message.author.mention}\nChannel: {message.channel.mention}",
+                embed = discord.Embed(
+                    title="Scanner detected a violating message.",
+                    description=f"Author: {message.author.mention}\nChannel: {message.channel.mention}",
+                )
+                embed.add_field(name="Content", value=message.content)
+                embed.add_field(name="Violating:", value=tm_builder)
+                if not deleted:
+                    embed.add_field(
+                        name="Message was not deleted",
+                        value=f"Here's a jump url: [Click Here]({message.jump_url})",
                     )
-                    embed.add_field(name="Content", value=message.content)
-                    embed.add_field(name="Violating:", value=tm_builder)
-                    if not deleted:
-                        embed.add_field(
-                            name="Message was not deleted",
-                            value=f"Here's a jump url: [Click Here]({message.jump_url})",
-                        )
-                    content = await self.get_mentions(message.guild)
-                    await channel.send(
-                        content=content,
-                        embed=embed,
-                        allowed_mentions=discord.AllowedMentions(
-                            everyone=False, users=True, roles=True
-                        ),
-                    )
+                await self.send_report(message, embed)
         except Exception as error:
             await message.channel.send("Error")
             await message.channel.send(
@@ -269,10 +275,9 @@ class Scanner(commands.Cog):
                             tm_violations.append((personal["type"], personal["match"]))
 
                     if tm_violations:
-                        tm_builder = "\n".join(
-                            f"Text Moderation ({violation[0]}): {violation[1]}"
-                            for violation in tm_violations
-                        )
+                        tm_builder = ""
+                        for violation in tm_violations:
+                            tm_builder += f"Text Moderation ({violation[0]}): {violation[1]}\n"
 
                 if nudity or partial or wad or offensive or scammer or tm_violations:
                     if settings["showpic"]:
@@ -283,45 +288,40 @@ class Scanner(commands.Cog):
                         with contextlib.suppress(discord.HTTPException):
                             await message.delete()
                             deleted = True
-                    channel = self.bot.get_channel(settings["channel"])
-                    if channel:
-                        embed = discord.Embed(
-                            title="Scanner detected a violating image.",
-                            description=f"Author: {message.author.mention}\nChannel: {message.channel.mention}",
+                    embed = discord.Embed(
+                        title="Scanner detected a violating image.",
+                        description=f"Author: {message.author.mention}\nChannel: {message.channel.mention}",
+                    )
+                    if settings["showpic"]:
+                        embed.set_image(url=f"attachment://{attach.filename}")
+                    violating = (
+                        "Nudity\n"
+                        if nudity
+                        else "" "Partial Nudity\n"
+                        if partial
+                        else "" "WAD\n"
+                        if wad
+                        else "" "Offensive\n"
+                        if offensive
+                        else "" "Scammer\n"
+                        if scammer
+                        else "" f"{tm_builder}"
+                        if tm_violations
+                        else ""
+                    )
+                    embed.add_field(name="Violating:", value=violating)
+                    if not deleted:
+                        embed.add_field(
+                            name="Message was not deleted",
+                            value=f"Here's a jump url: [Click Here]({message.jump_url})",
                         )
-                        if settings["showpic"]:
-                            embed.set_image(url=f"attachment://{attach.filename}")
-                        violating = "\n".join(
-                            filter(
-                                None,
-                                [
-                                    "Nudity" if nudity else "",
-                                    "Partial Nudity" if partial else "",
-                                    "WAD" if wad else "",
-                                    "Offensive" if offensive else "",
-                                    "Scammer" if scammer else "",
-                                    tm_builder if tm_violations else "",
-                                ],
-                            )
-                        )
-                        embed.add_field(name="Violating:", value=violating)
-                        if not deleted:
-                            embed.add_field(
-                                name="Message was not deleted",
-                                value=f"Here's a jump url: [Click Here]({message.jump_url})",
-                            )
-                        content = await self.get_mentions(message.guild)
-                        if settings["showpic"]:
-                            await channel.send(content=content, embed=embed, file=f)
-                        else:
-                            await channel.send(content=content, embed=embed)
+                    await self.send_report(message, embed, file=f if settings["showpic"] else None)
         except Exception as error:
             await message.channel.send("Error")
             await message.channel.send(
                 "".join(traceback.format_exception(type(error), error, error.__traceback__))
             )
 
-    # Administrative commands for configuration
     @commands.admin_or_permissions(manage_messages=True)
     @commands.group()
     async def scanner(self, ctx):
@@ -369,64 +369,54 @@ class Scanner(commands.Cog):
             await ctx.send("Messages will now not be shown in the report.")
 
     @report.command()
-    async def mentionrole(self, ctx, *, role: discord.Role = None):
-        """Add or remove roles from being mentioned when a report is sent."""
+    async def pingrole(self, ctx, *, role: discord.Role = None):
+        """Add or remove roles from being pinged when a report is sent."""
         if role:
-            async with self.conf.guild(ctx.guild).mention_roles() as mention_roles:
-                if role.id in mention_roles:
-                    mention_roles.remove(role.id)
-                    await ctx.send(f"The {role.name} role has been removed from mentions.")
+            async with self.conf.guild(ctx.guild).roles() as roles:
+                if role.id in roles:
+                    roles.remove(role.id)
+                    await ctx.send(f"The {role.name} role has been removed.")
                 else:
-                    mention_roles.append(role.id)
-                    await ctx.send(f"The {role.name} role has been added for mentions.")
+                    roles.append(role.id)
+                    await ctx.send(f"The {role.name} role has been added.")
         else:
-            mention_roles = await self.conf.guild(ctx.guild).mention_roles()
-            new = copy.deepcopy(mention_roles)
-            if not mention_roles:
-                await ctx.send("No roles are set for mentions right now.")
+            roles = await self.conf.guild(ctx.guild).roles()
+            new = copy.deepcopy(roles)
+            if not roles:
+                await ctx.send("No roles are set for ping right now.")
                 return
             e = discord.Embed(
-                title="The following roles are mentioned when a report comes in.", description=""
+                title="The following roles are pinged when a report comes in.", description=""
             )
-            for r in mention_roles:
+            for r in roles:
                 ro = ctx.guild.get_role(r)
                 if ro:
                     e.description += ro.mention + "\n"
                 else:
                     new.remove(r)
-            if new != mention_roles:
-                await self.conf.guild(ctx.guild).mention_roles.set(new)
+            if new != roles:
+                await self.conf.guild(ctx.guild).roles.set(new)
             await ctx.send(embed=e)
 
     @report.command()
-    async def mentionuser(self, ctx, *, user: discord.Member = None):
-        """Add or remove users from being mentioned when a report is sent."""
-        if user:
-            async with self.conf.guild(ctx.guild).mention_users() as mention_users:
-                if user.id in mention_users:
-                    mention_users.remove(user.id)
-                    await ctx.send(f"The user {user.name} has been removed from mentions.")
-                else:
-                    mention_users.append(user.id)
-                    await ctx.send(f"The user {user.name} has been added for mentions.")
+    async def mentionrole(self, ctx, role: discord.Role = None):
+        """Set a role to be mentioned in every report."""
+        if role:
+            await self.conf.guild(ctx.guild).mention_role.set(role.id)
+            await ctx.send(f"The {role.name} role will be mentioned in every report.")
         else:
-            mention_users = await self.conf.guild(ctx.guild).mention_users()
-            new = copy.deepcopy(mention_users)
-            if not mention_users:
-                await ctx.send("No users are set for mentions right now.")
-                return
-            e = discord.Embed(
-                title="The following users are mentioned when a report comes in.", description=""
-            )
-            for u in mention_users:
-                us = ctx.guild.get_member(u)
-                if us:
-                    e.description += us.mention + "\n"
-                else:
-                    new.remove(u)
-            if new != mention_users:
-                await self.conf.guild(ctx.guild).mention_users.set(new)
-            await ctx.send(embed=e)
+            await self.conf.guild(ctx.guild).mention_role.set(None)
+            await ctx.send("No role will be mentioned in reports.")
+
+    @report.command()
+    async def mentionuser(self, ctx, user: discord.Member = None):
+        """Set a user to be mentioned in every report."""
+        if user:
+            await self.conf.guild(ctx.guild).mention_user.set(user.id)
+            await ctx.send(f"{user.display_name} will be mentioned in every report.")
+        else:
+            await self.conf.guild(ctx.guild).mention_user.set(None)
+            await ctx.send("No user will be mentioned in reports.")
 
     @commands.is_owner()
     @scanner.command()
@@ -451,22 +441,22 @@ class Scanner(commands.Cog):
             for c in settings["blacklist"]
             if self.bot.get_channel(c)
         ] or ["`None`"]
-        mention_roles = [
-            ctx.guild.get_role(r).mention
-            for r in settings["mention_roles"]
-            if ctx.guild.get_role(r)
-        ] or ["`None`"]
-        mention_users = [
-            ctx.guild.get_member(u).mention
-            for u in settings["mention_users"]
-            if ctx.guild.get_member(u)
-        ] or ["`None`"]
+        mention_role = (
+            ctx.guild.get_role(settings["mention_role"]).mention
+            if settings["mention_role"] and ctx.guild.get_role(settings["mention_role"])
+            else "`None`"
+        )
+        mention_user = (
+            ctx.guild.get_member(settings["mention_user"]).mention
+            if settings["mention_user"] and ctx.guild.get_member(settings["mention_user"])
+            else "`None`"
+        )
         s = (
             f"Reporting Channel: {channel.mention if channel else '`None`'}\n"
             f"Whitelisted Channels: {humanize_list(whitelist)}\n"
             f"Blacklisted Channels: {humanize_list(blacklist)}\n"
-            f"Mentioned Roles: {humanize_list(mention_roles)}\n"
-            f"Mentioned Users: {humanize_list(mention_users)}\n"
+            f"Mentioned Role: {mention_role}\n"
+            f"Mentioned User: {mention_user}\n"
             "```py\n"
             f"Percent: {settings['percent']}\n"
             f"Auto Deleting: {settings['autodelete']}\n"
@@ -653,7 +643,7 @@ class Scanner(commands.Cog):
     async def checks_add(self, ctx, *checks: str):
         """Adds checks to the Text Moderation check.
 
-        Must be `sexual`, `insult`, `disciminatory`, `innapropriate`, `other_profanity`, `email`, `ipv4`, `ipv6`, `phone_number`, `ssn`, `passport`, or `driver_license`.
+        Must be `sexual`, `insult`, `disciminatory`, `innapropriate`, `other_profanity`, `email`, `ipv4`, `ipv6`, `phone_number_us`, `phone_number_uk`, `phone_number_fr` or `ssn`.
         """
         if not checks:
             return await ctx.send_help()
@@ -703,7 +693,7 @@ class Scanner(commands.Cog):
 
     @tm.command(name="enable")
     async def textmoderation_enable(self, ctx, yes_or_no: bool):
-        """Set whether or not to check for Text Moderation in images."""
+        """Set whether or not to check for Text Mderation in images."""
         async with self.conf.guild(ctx.guild).textmoderation() as data:
             data["enabled"] = yes_or_no
         if yes_or_no:
@@ -740,7 +730,7 @@ class Scanner(commands.Cog):
     async def mm_checks_add(self, ctx, *checks: str):
         """Adds checks to the Message Moderation check.
 
-        Must be `sexual`, `insult`, `disciminatory`, `innapropriate`, `other_profanity`, `email`, `ipv4`, `ipv6`, `phone_number`, `ssn`, `passport`, or `driver_license`.
+        Must be `sexual`, `insult`, `disciminatory`, `innapropriate`, `other_profanity`, `email`, `ipv4`, `ipv6`, `phone_number_us`, `phone_number_uk`, `phone_number_fr` or `ssn`.
         """
         if not checks:
             return await ctx.send_help()
@@ -791,12 +781,12 @@ class Scanner(commands.Cog):
     @commands.is_owner()
     @mm.command(name="enable")
     async def messagemoderation_enable(self, ctx, yes_or_no: bool):
-        """Set whether or not to check for Message Moderation."""
+        """Set whether or not to check for Message Mderation."""
         async with self.conf.guild(ctx.guild).rawtextmoderation() as data:
             data["enabled"] = yes_or_no
         if yes_or_no:
             await ctx.send(
-                "Messages will now be reported if they violate the Message Moderation checks.\nThis will make your bot slower and will use up your API quota fast!  Be aware of issues that may arise due to this."
+                "Messages will now be reported if they violate the MessageModeration checks.\nThis will make your bot slower and will use up your API quota fast!  Be aware of issues that may arise due to this."
             )
         else:
             await ctx.send(
