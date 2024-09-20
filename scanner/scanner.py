@@ -149,6 +149,7 @@ class Scanner(commands.Cog):
                             for u in settings["mention_users"]
                             if message.guild.get_member(u)
                         ]
+                        # Ensure both roles and users are mentioned
                         content = " ".join(role_mentions + user_mentions)
                     await channel.send(
                         content=content,
@@ -318,6 +319,7 @@ class Scanner(commands.Cog):
                                 for u in settings["mention_users"]
                                 if message.guild.get_member(u)
                             ]
+                            # Ensure both roles and users are mentioned
                             content = " ".join(role_mentions + user_mentions)
                         if settings["showpic"]:
                             await channel.send(content=content, embed=embed, file=f)
