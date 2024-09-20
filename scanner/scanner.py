@@ -116,14 +116,17 @@ class Scanner(commands.Cog):
                 return
 
             settings = await self.conf.guild(message.guild).all()
+
+            # Whitelist and blacklist logic
+            if settings["whitelist"] and message.channel.id not in settings["whitelist"]:
+                return
+            if not settings["whitelist"] and message.channel.id in settings["blacklist"]:
+                return
+
             if not (
                 settings["rawtextmoderation"]["enabled"]
                 and settings["rawtextmoderation"]["enabled"]
             ):
-                return
-            if settings["whitelist"] and message.channel.id not in settings["whitelist"]:
-                return
-            if message.channel.id in settings["blacklist"]:
                 return
 
             data = await self.conf.all()
@@ -207,9 +210,11 @@ class Scanner(commands.Cog):
                 return
 
             settings = await self.conf.guild(message.guild).all()
+
+            # Whitelist and blacklist logic
             if settings["whitelist"] and message.channel.id not in settings["whitelist"]:
                 return
-            if message.channel.id in settings["blacklist"]:
+            if not settings["whitelist"] and message.channel.id in settings["blacklist"]:
                 return
 
             data = await self.conf.all()
