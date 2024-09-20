@@ -340,9 +340,13 @@ class Scanner(commands.Cog):
                             )
                         content = self.get_mentions(message.guild, settings["mention_roles"], settings["mention_users"])
                         if settings["showpic"]:
-                            await channel.send(content=content, embed=embed, file=f)
+                            await channel.send(content=content, embed=embed, file=f, allowed_mentions=discord.AllowedMentions(
+                                everyone=False, users=True, roles=True
+                            ))
                         else:
-                            await channel.send(content=content, embed=embed)
+                            await channel.send(content=content, embed=embed, allowed_mentions=discord.AllowedMentions(
+                                everyone=False, users=True, roles=True
+                            ))
         except Exception as error:
             await message.channel.send("Error")
             await message.channel.send(
